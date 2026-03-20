@@ -24,8 +24,8 @@ defmodule ElixirStress.Router do
         .tooltip-wrap .tooltip {
           visibility: hidden; opacity: 0;
           position: absolute; z-index: 10; bottom: 125%; left: 50%; transform: translateX(-50%);
-          width: 420px; padding: 16px; background: #1a1a2e; color: #eee; border-radius: 8px;
-          font-size: 13px; line-height: 1.5; box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+          width: 420px; max-height: 80vh; overflow-y: auto; padding: 16px; background: #1a1a2e; color: #eee; border-radius: 8px;
+          font-size: 12px; line-height: 1.4; box-shadow: 0 4px 20px rgba(0,0,0,0.3);
           transition: opacity 0.2s, visibility 0.2s;
         }
         .tooltip-wrap .tooltip::after {
@@ -54,37 +54,34 @@ defmodule ElixirStress.Router do
           <span class="tooltip-wrap">
             <span class="info-icon">i</span>
             <span class="tooltip">
-              <h4>Full Stress Test — ~50+ concurrent workers</h4>
-              <div class="section">
-                <span class="section-title">BEAM Stress</span>
-                <ul>
-                  <li><b>10x Memory hogs</b> — hold 50-200MB each, sawtooth alloc/release pattern</li>
-                  <li><b>CPU saturate</b> (2x schedulers) — fibonacci, sorting, SHA-256, matrix multiply, Ackermann, permutations</li>
-                  <li><b>4x Disk thrash</b> — write/read/hash 20-100MB files per cycle</li>
-                  <li><b>2x Process explosion</b> — spawn 2k-10k processes/cycle, up to 20k alive</li>
-                  <li><b>2x ETS bloat</b> — 50k row inserts, full table scans, concurrent writes</li>
-                  <li><b>4x GC torture</b> — massive garbage allocation + forced GC, 50 sub-processes/cycle</li>
-                  <li><b>4x Binary abuse</b> — 2-8MB binaries with sub-binary slices across processes</li>
-                  <li><b>2x Message queue</b> — 10k messages flooding slow consumers (100ms/msg)</li>
-                  <li><b>2x Port churn</b> — open/pump/close 20-60 OS ports per cycle</li>
-                  <li><b>1x Atom growth</b> — 500-1000 unique atoms/batch (never GC'd)</li>
-                </ul>
-              </div>
+              <h4>Full Stress Test</h4>
+              <ul>
+                <li><b>10x Memory hogs</b> (hold tens to hundreds of MB each)</li>
+                <li><b>CPU saturate</b> (2x schedulers — primes, sorting, hashing, fibonacci, matrix multiply)</li>
+                <li><b>4x Disk I/O thrash</b> (write/read/hash 20-100MB files)</li>
+                <li><b>2x Process explosion</b> (up to 20k live processes)</li>
+                <li><b>2x ETS bloat</b> (50k row inserts, full table scans)</li>
+                <li><b>4x GC torture</b> (massive garbage + forced collection)</li>
+                <li><b>4x Binary heap abuse</b> (2-8MB binaries shared across processes)</li>
+                <li><b>2x Message queue pressure</b> (10k messages flooding slow consumers)</li>
+                <li><b>2x Port churn</b> (open/pump/close 20-60 ports)</li>
+                <li><b>Atom growth</b> (500-1000 atoms per batch)</li>
+              </ul>
               <div class="section">
                 <span class="section-title">OTel Pipeline Stress (Tier 4)</span>
                 <ul>
-                  <li><b>2x Span flood</b> — thousands of micro-spans/sec stress Tempo ingestion</li>
-                  <li><b>2x High cardinality</b> — unique attributes stress Tempo indexing</li>
-                  <li><b>1x Large payloads</b> — spans with massive event data</li>
-                  <li><b>1x Metric flood</b> — thousands of telemetry events/sec stress Mimir</li>
-                  <li><b>1x Log flood</b> — structured logs flooding Loki via OTLP</li>
+                  <li><b>2x Span flood</b> (thousands of micro-spans/sec)</li>
+                  <li><b>2x High cardinality</b> (unique attribute values stress Tempo indexing)</li>
+                  <li><b>Large payloads</b> (spans with massive event data)</li>
+                  <li><b>Metric flood</b> (thousands of telemetry events/sec)</li>
+                  <li><b>Log flood</b> (structured logs flooding Loki)</li>
                 </ul>
               </div>
               <div class="section">
                 <span class="section-title">Distributed Tracing (Tier 5)</span>
                 <ul>
-                  <li><b>2x Distributed callers</b> — HTTP to worker service (:4003) with W3C traceparent</li>
-                  <li>Worker endpoints: compute, store, transform with nested child spans</li>
+                  <li><b>2x Distributed callers</b> (HTTP calls to worker service on :4003 with W3C traceparent propagation)</li>
+                  <li>Worker service endpoints: compute, store, transform — each with nested child spans</li>
                 </ul>
               </div>
             </span>
