@@ -10,29 +10,138 @@ defmodule ElixirStress.Router do
     html = """
     <!DOCTYPE html>
     <html>
-    <head><title>Elixir Stress</title></head>
+    <head>
+      <title>Elixir Stress</title>
+      <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #333; }
+        h1 { color: #6e4aad; }
+        .test-card { border: 1px solid #ddd; border-radius: 8px; padding: 20px; margin-bottom: 20px; background: #fafafa; }
+        .test-card h3 { margin-top: 0; }
+        select, button { padding: 8px 16px; font-size: 14px; border-radius: 4px; }
+        button { background: #6e4aad; color: white; border: none; cursor: pointer; font-weight: bold; }
+        button:hover { background: #5a3d8e; }
+        .tooltip-wrap { position: relative; display: inline-block; }
+        .tooltip-wrap .tooltip {
+          visibility: hidden; opacity: 0;
+          position: absolute; z-index: 10; bottom: 125%; left: 50%; transform: translateX(-50%);
+          width: 420px; padding: 16px; background: #1a1a2e; color: #eee; border-radius: 8px;
+          font-size: 13px; line-height: 1.5; box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+          transition: opacity 0.2s, visibility 0.2s;
+        }
+        .tooltip-wrap .tooltip::after {
+          content: ""; position: absolute; top: 100%; left: 50%; margin-left: -8px;
+          border-width: 8px; border-style: solid; border-color: #1a1a2e transparent transparent transparent;
+        }
+        .tooltip-wrap:hover .tooltip { visibility: visible; opacity: 1; }
+        .tooltip h4 { margin: 0 0 8px 0; color: #b794f4; font-size: 14px; }
+        .tooltip ul { margin: 4px 0; padding-left: 18px; }
+        .tooltip li { margin: 2px 0; }
+        .tooltip .section { margin-top: 10px; }
+        .tooltip .section-title { color: #f6ad55; font-weight: bold; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .info-icon { display: inline-block; width: 20px; height: 20px; background: #6e4aad; color: white; border-radius: 50%; text-align: center; line-height: 20px; font-size: 12px; font-weight: bold; cursor: help; margin-left: 6px; vertical-align: middle; }
+        .links { margin-top: 30px; padding-top: 15px; border-top: 1px solid #ddd; }
+        .links a { color: #6e4aad; text-decoration: none; font-weight: 500; }
+        .links a:hover { text-decoration: underline; }
+        .duration-info { font-size: 12px; color: #888; margin-top: 4px; }
+      </style>
+    </head>
     <body>
       <h1>Elixir Stress Test</h1>
-      <form action="/stress" method="post">
-        <label>Full stress test (BEAM + OTel pipeline + distributed tracing):</label><br><br>
-        <select name="duration">
-          <option value="15">15 seconds</option>
-          <option value="30" selected>30 seconds</option>
-          <option value="60">60 seconds</option>
-          <option value="120">2 minutes</option>
-        </select>
-        <button type="submit">Run Full Stress Test</button>
-      </form>
-      <br>
-      <form action="/burn" method="post">
-        <label>Quick CPU and memory spike:</label><br><br>
-        <button type="submit">Run Busy Loop</button>
-      </form>
-      <br>
-      <p>
-        <a href="http://localhost:4002/dashboard" target="_blank">Open Phoenix LiveDashboard</a> |
-        <a href="http://localhost:3404" target="_blank">Open Grafana</a>
-      </p>
+
+      <div class="test-card">
+        <h3>
+          Full Stress Test
+          <span class="tooltip-wrap">
+            <span class="info-icon">i</span>
+            <span class="tooltip">
+              <h4>Full Stress Test — ~50+ concurrent workers</h4>
+              <div class="section">
+                <span class="section-title">BEAM Stress</span>
+                <ul>
+                  <li><b>10x Memory hogs</b> — hold 50-200MB each, sawtooth alloc/release pattern</li>
+                  <li><b>CPU saturate</b> (2x schedulers) — fibonacci, sorting, SHA-256, matrix multiply, Ackermann, permutations</li>
+                  <li><b>4x Disk thrash</b> — write/read/hash 20-100MB files per cycle</li>
+                  <li><b>2x Process explosion</b> — spawn 2k-10k processes/cycle, up to 20k alive</li>
+                  <li><b>2x ETS bloat</b> — 50k row inserts, full table scans, concurrent writes</li>
+                  <li><b>4x GC torture</b> — massive garbage allocation + forced GC, 50 sub-processes/cycle</li>
+                  <li><b>4x Binary abuse</b> — 2-8MB binaries with sub-binary slices across processes</li>
+                  <li><b>2x Message queue</b> — 10k messages flooding slow consumers (100ms/msg)</li>
+                  <li><b>2x Port churn</b> — open/pump/close 20-60 OS ports per cycle</li>
+                  <li><b>1x Atom growth</b> — 500-1000 unique atoms/batch (never GC'd)</li>
+                </ul>
+              </div>
+              <div class="section">
+                <span class="section-title">OTel Pipeline Stress (Tier 4)</span>
+                <ul>
+                  <li><b>2x Span flood</b> — thousands of micro-spans/sec stress Tempo ingestion</li>
+                  <li><b>2x High cardinality</b> — unique attributes stress Tempo indexing</li>
+                  <li><b>1x Large payloads</b> — spans with massive event data</li>
+                  <li><b>1x Metric flood</b> — thousands of telemetry events/sec stress Mimir</li>
+                  <li><b>1x Log flood</b> — structured logs flooding Loki via OTLP</li>
+                </ul>
+              </div>
+              <div class="section">
+                <span class="section-title">Distributed Tracing (Tier 5)</span>
+                <ul>
+                  <li><b>2x Distributed callers</b> — HTTP to worker service (:4003) with W3C traceparent</li>
+                  <li>Worker endpoints: compute, store, transform with nested child spans</li>
+                </ul>
+              </div>
+            </span>
+          </span>
+        </h3>
+        <form action="/stress" method="post">
+          <select name="duration" id="duration-select">
+            <option value="15">15 seconds</option>
+            <option value="30" selected>30 seconds</option>
+            <option value="60">60 seconds</option>
+            <option value="120">2 minutes</option>
+          </select>
+          <span class="tooltip-wrap">
+            <span class="info-icon">?</span>
+            <span class="tooltip" style="width: 300px;">
+              <h4>Duration Guide</h4>
+              <ul>
+                <li><b>15s</b> — Quick smoke test. Workers start but many only complete 1-2 cycles.</li>
+                <li><b>30s</b> — Good default. Enough time to see patterns in Grafana.</li>
+                <li><b>60s</b> — Full soak. Memory sawtooth and atom growth become clearly visible.</li>
+                <li><b>120s</b> — Extended run. Process explosion hits 20k cap, ETS tables grow large, atom count climbs significantly.</li>
+              </ul>
+            </span>
+          </span>
+          <br><br>
+          <button type="submit">Run Full Stress Test</button>
+        </form>
+      </div>
+
+      <div class="test-card">
+        <h3>
+          Quick Burn
+          <span class="tooltip-wrap">
+            <span class="info-icon">i</span>
+            <span class="tooltip" style="width: 320px;">
+              <h4>Quick Burn — lightweight CPU + memory spike</h4>
+              <ul>
+                <li>Spawns <b>10 processes</b></li>
+                <li>Each builds a <b>500k element list</b></li>
+                <li>Sums the list <b>20 times</b></li>
+                <li>Visible as a brief spike in CPU run queues and process memory</li>
+                <li>Completes in ~2-5 seconds</li>
+              </ul>
+              <p style="margin-top:8px;color:#aaa;">Good for verifying dashboards are working without running the full stress suite.</p>
+            </span>
+          </span>
+        </h3>
+        <form action="/burn" method="post">
+          <button type="submit">Run Quick Burn</button>
+        </form>
+      </div>
+
+      <div class="links">
+        <a href="http://localhost:4002/dashboard" target="_blank">Phoenix LiveDashboard</a> &nbsp;|&nbsp;
+        <a href="http://localhost:3404/d/elixir-stress-test" target="_blank">Grafana: Stress Test</a> &nbsp;|&nbsp;
+        <a href="http://localhost:3404/d/elixir-app-metrics" target="_blank">Grafana: App Metrics</a>
+      </div>
     </body>
     </html>
     """
