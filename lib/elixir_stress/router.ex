@@ -167,35 +167,41 @@ defmodule ElixirStress.Router do
     html = """
     <!DOCTYPE html>
     <html>
-    <head>
-      <title>Stress Test Running</title>
-      <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #333; }
-        h1 { color: #6e4aad; }
-        #timer { font-size: 72px; font-weight: bold; color: #6e4aad; font-variant-numeric: tabular-nums; margin: 20px 0; }
-        .links { margin-top: 30px; padding-top: 15px; border-top: 1px solid #ddd; }
-        .links a { color: #6e4aad; text-decoration: none; font-weight: 500; }
-        .links a:hover { text-decoration: underline; }
-      </style>
-    </head>
+    <head><title>Stress Test Running</title></head>
     <body>
-      <h1>Full Stress Test</h1>
-      <div id="timer">#{duration}</div>
-      <div class="links">
-        <a href="http://localhost:4002/dashboard" target="_blank">Phoenix LiveDashboard</a> &nbsp;|&nbsp;
-        <a href="http://localhost:3404/d/elixir-stress-test" target="_blank">Grafana: Stress Test</a> &nbsp;|&nbsp;
-        <a href="http://localhost:3404/d/elixir-app-metrics" target="_blank">Grafana: App Metrics</a> &nbsp;|&nbsp;
-        <a href="/">Go back</a>
-      </div>
-      <script>
-        var remaining = #{duration};
-        var el = document.getElementById('timer');
-        var interval = setInterval(function() {
-          remaining--;
-          if (remaining <= 0) { remaining = 0; clearInterval(interval); }
-          el.textContent = remaining;
-        }, 1000);
-      </script>
+      <h1>Full Stress Test Started!</h1>
+      <p>Running for #{duration} seconds with:</p>
+      <ul>
+        <li>10x Memory hogs (hold tens to hundreds of MB each)</li>
+        <li>CPU saturate (2x schedulers — primes, sorting, hashing, fibonacci, matrix multiply)</li>
+        <li>4x Disk I/O thrash (write/read/hash 20-100MB files)</li>
+        <li>2x Process explosion (up to 20k live processes)</li>
+        <li>2x ETS bloat (50k row inserts, full table scans)</li>
+        <li>4x GC torture (massive garbage + forced collection)</li>
+        <li>4x Binary heap abuse (2-8MB binaries shared across processes)</li>
+        <li>2x Message queue pressure (10k messages flooding slow consumers)</li>
+        <li>2x Port churn (open/pump/close 20-60 ports)</li>
+        <li>Atom growth (500-1000 atoms per batch)</li>
+      </ul>
+      <h3>OTel Pipeline Stress (Tier 4)</h3>
+      <ul>
+        <li>2x Span flood (thousands of micro-spans/sec)</li>
+        <li>2x High cardinality (unique attribute values stress Tempo indexing)</li>
+        <li>Large payloads (spans with massive event data)</li>
+        <li>Metric flood (thousands of telemetry events/sec)</li>
+        <li>Log flood (structured logs flooding Loki)</li>
+      </ul>
+      <h3>Distributed Tracing (Tier 5)</h3>
+      <ul>
+        <li>2x Distributed callers (HTTP calls to worker service on :4003 with W3C traceparent propagation)</li>
+        <li>Worker service endpoints: compute, store, transform — each with nested child spans</li>
+      </ul>
+      <p>Watch it live:</p>
+      <ul>
+        <li><a href="http://localhost:4002/dashboard" target="_blank">Phoenix LiveDashboard</a></li>
+        <li><a href="http://localhost:3404" target="_blank">Grafana (LGTM)</a></li>
+      </ul>
+      <a href="/">Go back</a>
     </body>
     </html>
     """
@@ -218,34 +224,15 @@ defmodule ElixirStress.Router do
     html = """
     <!DOCTYPE html>
     <html>
-    <head>
-      <title>Quick Burn</title>
-      <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #333; }
-        h1 { color: #6e4aad; }
-        #timer { font-size: 72px; font-weight: bold; color: #6e4aad; font-variant-numeric: tabular-nums; margin: 20px 0; }
-        .links { margin-top: 30px; padding-top: 15px; border-top: 1px solid #ddd; }
-        .links a { color: #6e4aad; text-decoration: none; font-weight: 500; }
-        .links a:hover { text-decoration: underline; }
-      </style>
-    </head>
+    <head><title>Burning!</title></head>
     <body>
-      <h1>Quick Burn</h1>
-      <div id="timer">5</div>
-      <div class="links">
-        <a href="http://localhost:4002/dashboard" target="_blank">Phoenix LiveDashboard</a> &nbsp;|&nbsp;
-        <a href="http://localhost:3404/d/elixir-stress-test" target="_blank">Grafana: Stress Test</a> &nbsp;|&nbsp;
-        <a href="/">Go back</a>
-      </div>
-      <script>
-        var remaining = 5;
-        var el = document.getElementById('timer');
-        var interval = setInterval(function() {
-          remaining--;
-          if (remaining <= 0) { remaining = 0; clearInterval(interval); }
-          el.textContent = remaining;
-        }, 1000);
-      </script>
+      <h1>Busy loop started!</h1>
+      <p>Spawned 10 processes each crunching 500k element lists.</p>
+      <p>
+        <a href="http://localhost:4002/dashboard" target="_blank">Phoenix LiveDashboard</a> |
+        <a href="http://localhost:3404" target="_blank">Grafana</a>
+      </p>
+      <a href="/">Go back</a>
     </body>
     </html>
     """
