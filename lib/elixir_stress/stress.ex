@@ -217,6 +217,18 @@ defmodule ElixirStress.Stress do
     })
   end
 
+  defp emit_app(event, measurements, metadata) do
+    :telemetry.execute([:elixir_stress, :app | event], measurements, metadata)
+  end
+
+  defp timed_cycle(worker_name, fun) do
+    start = System.monotonic_time(:microsecond)
+    result = fun.()
+    duration_us = System.monotonic_time(:microsecond) - start
+    emit_app([:cycle_duration], %{duration: duration_us}, %{worker: Atom.to_string(worker_name)})
+    result
+  end
+
   # ============================================================
   # MEMORY HOG
   # ============================================================
@@ -228,62 +240,73 @@ defmodule ElixirStress.Stress do
   defp memory_hog_loop(deadline, held, cycles) do
     if past?(deadline) do
       held_mb = div(:erlang.external_size(held), 1_048_576)
-
       Tracer.set_attributes(%{total_cycles: cycles, final_held_mb: held_mb})
       {:memory_hog, cycles: cycles, held_mb: held_mb}
     else
-      Tracer.with_span "memory_hog.cycle",
-        attributes: %{cycle: cycles, chunks_held: length(held)} do
-        alloc_count = Enum.random([5, 10, 20])
+      held = timed_cycle(:memory_hog, fn ->
+        Tracer.with_span "memory_hog.cycle",
+          attributes: %{cycle: cycles, chunks_held: length(held)} do
+          alloc_count = Enum.random([5, 10, 20])
 
-        new_chunks =
-          for _ <- 1..alloc_count do
-            case Enum.random(1..4) do
-              1 ->
-                Tracer.add_event("allocate_list", %{elements: 2_000_000})
-                Enum.to_list(1..Enum.random([500_000, 1_000_000, 2_000_000]))
+          new_chunks =
+            for _ <- 1..alloc_count do
+              case Enum.random(1..4) do
+                1 ->
+                  Tracer.add_event("allocate_list", %{elements: 2_000_000})
+                  Enum.to_list(1..Enum.random([500_000, 1_000_000, 2_000_000]))
 
-              2 ->
-                size = Enum.random([1_048_576, 2_097_152, 4_194_304])
-                Tracer.add_event("allocate_binary", %{bytes: size})
-                :crypto.strong_rand_bytes(size)
+                2 ->
+                  size = Enum.random([1_048_576, 2_097_152, 4_194_304])
+                  Tracer.add_event("allocate_binary", %{bytes: size})
+                  :crypto.strong_rand_bytes(size)
 
-              3 ->
-                keys = Enum.random([100_000, 500_000])
-                Tracer.add_event("allocate_map", %{keys: keys})
-                Map.new(1..keys, fn i -> {i, :crypto.strong_rand_bytes(32)} end)
+                3 ->
+                  keys = Enum.random([100_000, 500_000])
+                  Tracer.add_event("allocate_map", %{keys: keys})
+                  Map.new(1..keys, fn i -> {i, :crypto.strong_rand_bytes(32)} end)
 
-              4 ->
-                depth = Enum.random([10, 15, 20])
-                Tracer.add_event("allocate_nested", %{depth: depth})
-                build_nested(depth)
+                4 ->
+                  depth = Enum.random([10, 15, 20])
+                  Tracer.add_event("allocate_nested", %{depth: depth})
+                  build_nested(depth)
+              end
             end
+
+          alloc_bytes = Enum.reduce(new_chunks, 0, fn chunk, acc -> acc + :erlang.external_size(chunk) end)
+          emit_app([:memory, :allocated], %{bytes: alloc_bytes, chunks: alloc_count}, %{worker: "memory_hog"})
+
+          held = new_chunks ++ held
+          Enum.each(held, fn chunk -> :erlang.phash2(chunk) end)
+
+          {held, released_bytes} =
+            if length(held) > Enum.random([30, 50, 80]) do
+              drop = Enum.random([div(length(held), 4), div(length(held), 3)])
+              {dropped, kept} = Enum.split(held, drop)
+              released = Enum.reduce(dropped, 0, fn chunk, acc -> acc + :erlang.external_size(chunk) end)
+              Tracer.add_event("memory_drop", %{dropping: drop, keeping: length(kept)})
+              {kept, released}
+            else
+              {held, 0}
+            end
+
+          if released_bytes > 0 do
+            emit_app([:memory, :released], %{bytes: released_bytes}, %{worker: "memory_hog"})
           end
 
-        held = new_chunks ++ held
-        Enum.each(held, fn chunk -> :erlang.phash2(chunk) end)
+          held_bytes = Enum.reduce(held, 0, fn chunk, acc -> acc + :erlang.external_size(chunk) end)
+          emit_app([:memory, :held], %{bytes: held_bytes, chunks: length(held)}, %{worker: "memory_hog"})
 
-        held =
-          if length(held) > Enum.random([30, 50, 80]) do
-            drop = Enum.random([div(length(held), 4), div(length(held), 3)])
-            Tracer.add_event("memory_drop", %{dropping: drop, keeping: length(held) - drop})
-            Enum.drop(held, drop)
-          else
-            held
-          end
-
-        Tracer.set_attributes(%{held_chunks: length(held), allocations: alloc_count})
-      end
+          Tracer.set_attributes(%{held_chunks: length(held), allocations: alloc_count})
+          held
+        end
+      end)
 
       emit_cycle(:memory_hog)
 
       if rem(cycles, 5) == 0 do
         held_mb = div(:erlang.external_size(held), 1_048_576)
-
         OtelLogger.info("memory_hog: cycle #{cycles}, holding #{held_mb}MB", %{
-          worker: "memory_hog",
-          cycle: cycles,
-          held_mb: held_mb
+          worker: "memory_hog", cycle: cycles, held_mb: held_mb
         })
       end
 
@@ -315,6 +338,7 @@ defmodule ElixirStress.Stress do
       Tracer.set_attributes(%{total_cycles: cycles})
       {:cpu_saturate, cycles}
     else
+      timed_cycle(:cpu_saturate, fn ->
       Tracer.with_span "cpu_saturate.cycle", attributes: %{cycle: cycles} do
         algo = Enum.random(1..6)
 
@@ -370,6 +394,7 @@ defmodule ElixirStress.Stress do
 
         Tracer.add_event("computation_complete", %{algorithm: algo_name})
       end
+      end)
 
       emit_cycle(:cpu_saturate)
       cpu_saturate_loop(deadline, cycles + 1)
@@ -400,43 +425,47 @@ defmodule ElixirStress.Stress do
       Tracer.set_attributes(%{total_cycles: cycles})
       {:disk_thrash, cycles}
     else
-      Tracer.with_span "disk_thrash.cycle", attributes: %{cycle: cycles} do
-        path = Path.join(@tmp_dir, "thrash_#{:erlang.unique_integer([:positive])}.bin")
-        count = Enum.random([20, 50, 100])
-        bytes = count * 1_048_576
+      timed_cycle(:disk_thrash, fn ->
+        Tracer.with_span "disk_thrash.cycle", attributes: %{cycle: cycles} do
+          path = Path.join(@tmp_dir, "thrash_#{:erlang.unique_integer([:positive])}.bin")
+          count = Enum.random([20, 50, 100])
+          bytes_written = count * 1_048_576
 
-        Tracer.with_span "disk.write", attributes: %{path: path, bytes: bytes} do
-          f = File.open!(path, [:write, :raw])
-          chunk = :crypto.strong_rand_bytes(1_048_576)
-          Enum.each(1..count, fn _ -> IO.binwrite(f, chunk) end)
-          File.close(f)
-          Tracer.add_event("file_written", %{chunks: count, total_bytes: bytes})
-        end
-
-        Tracer.with_span "disk.read_and_hash" do
-          case File.read(path) do
-            {:ok, data} ->
-              hash =
-                :crypto.hash(:sha256, data) |> Base.encode16(case: :lower) |> binary_part(0, 16)
-
-              Tracer.add_event("file_read_and_hashed", %{
-                bytes: byte_size(data),
-                hash_prefix: hash
-              })
-
-              modified =
-                :crypto.hash(:sha512, data) |> String.duplicate(div(byte_size(data), 64))
-
-              File.write!(path, modified)
-
-            _ ->
-              Tracer.add_event("file_read_failed", %{path: path})
+          Tracer.with_span "disk.write", attributes: %{path: path, bytes: bytes_written} do
+            f = File.open!(path, [:write, :raw])
+            chunk = :crypto.strong_rand_bytes(1_048_576)
+            Enum.each(1..count, fn _ -> IO.binwrite(f, chunk) end)
+            File.close(f)
+            Tracer.add_event("file_written", %{chunks: count, total_bytes: bytes_written})
           end
-        end
 
-        File.rm(path)
-        Tracer.add_event("file_deleted", %{path: path})
-      end
+          emit_app([:disk, :written], %{bytes: bytes_written}, %{worker: "disk_thrash"})
+
+          Tracer.with_span "disk.read_and_hash" do
+            case File.read(path) do
+              {:ok, data} ->
+                bytes_read = byte_size(data)
+                emit_app([:disk, :read], %{bytes: bytes_read}, %{worker: "disk_thrash"})
+
+                hash =
+                  :crypto.hash(:sha256, data) |> Base.encode16(case: :lower) |> binary_part(0, 16)
+
+                Tracer.add_event("file_read_and_hashed", %{bytes: bytes_read, hash_prefix: hash})
+
+                modified =
+                  :crypto.hash(:sha512, data) |> String.duplicate(div(byte_size(data), 64))
+
+                File.write!(path, modified)
+
+              _ ->
+                Tracer.add_event("file_read_failed", %{path: path})
+            end
+          end
+
+          File.rm(path)
+          Tracer.add_event("file_deleted", %{path: path})
+        end
+      end)
 
       emit_cycle(:disk_thrash)
       disk_thrash_loop(deadline, cycles + 1)
@@ -457,35 +486,41 @@ defmodule ElixirStress.Stress do
       Tracer.set_attributes(%{total_cycles: cycles})
       {:process_explosion, cycles}
     else
-      batch_size = Enum.random([2_000, 5_000, 10_000])
+      {alive, _killed} = timed_cycle(:process_explosion, fn ->
+        Tracer.with_span "process_explosion.cycle",
+          attributes: %{cycle: cycles, alive_before: length(alive)} do
+          batch_size = Enum.random([2_000, 5_000, 10_000])
 
-      Tracer.with_span "process_explosion.cycle",
-        attributes: %{cycle: cycles, batch_size: batch_size, alive_before: length(alive)} do
-        batch =
-          for _ <- 1..batch_size do
-            spawn(fn ->
-              data = Enum.to_list(1..Enum.random([1_000, 5_000, 10_000]))
-              Enum.reduce(data, 0, fn x, acc -> acc + x * x end)
-              receive do :die -> :ok after Enum.random([1_000, 3_000, 5_000]) -> :ok end
-            end)
+          batch =
+            for _ <- 1..batch_size do
+              spawn(fn ->
+                data = Enum.to_list(1..Enum.random([1_000, 5_000, 10_000]))
+                Enum.reduce(data, 0, fn x, acc -> acc + x * x end)
+                receive do :die -> :ok after Enum.random([1_000, 3_000, 5_000]) -> :ok end
+              end)
+            end
+
+          emit_app([:processes, :spawned], %{count: batch_size}, %{worker: "process_explosion"})
+          Tracer.add_event("processes_spawned", %{count: batch_size})
+
+          alive = (batch ++ alive) |> Enum.filter(&Process.alive?/1)
+
+          if length(alive) > 20_000 do
+            {to_kill, to_keep} = Enum.split(alive, 10_000)
+            Enum.each(to_kill, fn pid -> Process.exit(pid, :kill) end)
+            emit_app([:processes, :killed], %{count: 10_000}, %{worker: "process_explosion"})
+            Tracer.add_event("processes_culled", %{killed: 10_000, remaining: length(to_keep)})
+            {to_keep, 10_000}
+          else
+            Tracer.set_attributes(%{alive_after: length(alive)})
+            {alive, 0}
           end
-
-        Tracer.add_event("processes_spawned", %{count: batch_size})
-
-        alive = (batch ++ alive) |> Enum.filter(&Process.alive?/1)
-
-        if length(alive) > 20_000 do
-          {to_kill, to_keep} = Enum.split(alive, 10_000)
-          Enum.each(to_kill, fn pid -> Process.exit(pid, :kill) end)
-          Tracer.add_event("processes_culled", %{killed: 10_000, remaining: length(to_keep)})
-          emit_cycle(:process_explosion)
-          explosion_loop(deadline, to_keep, cycles + 1)
-        else
-          Tracer.set_attributes(%{alive_after: length(alive)})
-          emit_cycle(:process_explosion)
-          explosion_loop(deadline, alive, cycles + 1)
         end
-      end
+      end)
+
+      emit_app([:processes, :alive], %{count: length(alive)}, %{worker: "process_explosion"})
+      emit_cycle(:process_explosion)
+      explosion_loop(deadline, alive, cycles + 1)
     end
   end
 
@@ -710,37 +745,38 @@ defmodule ElixirStress.Stress do
       Tracer.set_attributes(%{total_cycles: cycles})
       {:message_queue_pressure, cycles}
     else
-      target_count = Enum.random([10, 20, 30])
+      timed_cycle(:message_queue_pressure, fn ->
+        target_count = Enum.random([10, 20, 30])
 
-      Tracer.with_span "message_queue.cycle",
-        attributes: %{cycle: cycles, targets: target_count} do
-        targets = for(_ <- 1..target_count, do: spawn(fn -> slow_consume(0) end))
+        Tracer.with_span "message_queue.cycle",
+          attributes: %{cycle: cycles, targets: target_count} do
+          targets = for(_ <- 1..target_count, do: spawn(fn -> slow_consume(0) end))
 
-        Tracer.add_event("consumers_spawned", %{count: target_count})
+          Tracer.add_event("consumers_spawned", %{count: target_count})
 
-        Enum.each(targets, fn target ->
-          spawn(fn ->
-            Enum.each(1..10_000, fn i ->
-              if Process.alive?(target) do
-                send(target, {:work, i, Enum.to_list(1..Enum.random([100, 500, 1000]))})
-              end
+          total_messages = target_count * 10_000
+          Enum.each(targets, fn target ->
+            spawn(fn ->
+              Enum.each(1..10_000, fn i ->
+                if Process.alive?(target) do
+                  send(target, {:work, i, Enum.to_list(1..Enum.random([100, 500, 1000]))})
+                end
+              end)
             end)
           end)
-        end)
 
-        Tracer.add_event("messages_sent", %{
-          per_target: 10_000,
-          total: target_count * 10_000
-        })
+          emit_app([:messages, :sent], %{count: total_messages}, %{worker: "message_queue_pressure"})
+          Tracer.add_event("messages_sent", %{per_target: 10_000, total: total_messages})
 
-        Process.sleep(Enum.random([500, 1_000, 2_000]))
+          Process.sleep(Enum.random([500, 1_000, 2_000]))
 
-        Enum.each(targets, fn pid ->
-          if Process.alive?(pid), do: Process.exit(pid, :kill)
-        end)
+          Enum.each(targets, fn pid ->
+            if Process.alive?(pid), do: Process.exit(pid, :kill)
+          end)
 
-        Tracer.add_event("consumers_killed", %{count: target_count})
-      end
+          Tracer.add_event("consumers_killed", %{count: target_count})
+        end
+      end)
 
       emit_cycle(:message_queue_pressure)
       msg_pressure_loop(deadline, cycles + 1)
@@ -773,6 +809,7 @@ defmodule ElixirStress.Stress do
     else
       port_count = Enum.random([20, 40, 60])
 
+      timed_cycle(:port_churn, fn ->
       Tracer.with_span "port_churn.cycle",
         attributes: %{cycle: cycles, target_ports: port_count} do
         Tracer.with_span "ports.open" do
@@ -814,9 +851,12 @@ defmodule ElixirStress.Stress do
             try do Port.close(port) rescue _ -> :ok end
           end)
 
+          emit_app([:ports, :opened], %{count: length(ports)}, %{worker: "port_churn"})
+          emit_app([:ports, :closed], %{count: length(ports)}, %{worker: "port_churn"})
           Tracer.add_event("ports_closed", %{count: length(ports)})
         end
       end
+      end)
 
       emit_cycle(:port_churn)
       port_churn_loop(deadline, cycles + 1)
@@ -934,10 +974,15 @@ defmodule ElixirStress.Stress do
               Tracer.set_attributes(%{"http.status_code": resp.status, duration_ms: duration})
               Tracer.add_event("response_received", %{status: resp.status, duration_ms: duration})
 
+              emit_app([:distributed, :call], %{duration: duration}, %{endpoint: endpoint, status: "success"})
+
               if resp.status in 200..299, do: :ok, else: :error
             rescue
               e ->
                 duration = System.monotonic_time(:millisecond) - start
+
+                emit_app([:distributed, :call], %{duration: duration}, %{endpoint: endpoint, status: "error"})
+                emit_app([:distributed, :error], %{count: 1}, %{endpoint: endpoint})
 
                 OpenTelemetry.Span.record_exception(
                   Tracer.current_span_ctx(),
